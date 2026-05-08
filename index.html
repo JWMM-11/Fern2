@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>fern.</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#F7F5F0;font-family:'Georgia',serif;overflow-x:hidden;color:#1a1a1a}
+  #root{max-width:430px;margin:0 auto;min-height:100vh}
+  @keyframes ripple{0%{transform:translate(-50%,-50%) scale(1);opacity:0.5}100%{transform:translate(-50%,-50%) scale(2.6);opacity:0}}
+  @keyframes bar{0%,100%{height:4px}50%{height:18px}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.3)}}
+  input,textarea{font-family:'Georgia',serif}
+  ::-webkit-scrollbar{width:3px}
+  ::-webkit-scrollbar-thumb{background:#C8D8C0;border-radius:4px}
+  .scroll{overflow-y:auto;-webkit-overflow-scrolling:touch}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useRef,useEffect,useCallback}=React;
+
+// ── Brand Colours (matching email) ────────────────────────
+const C={
+  forest:"#1C3A20",   // dark green — CTAs, headers
+  mid:"#2E5735",      // mid green
+  sage:"#5A8A5A",     // sage green
+  light:"#8AB88A",    // light green
+  dew:"#E8F0E8",      // very light green bg
+  cream:"#F7F5F0",    // main background
+  warm:"#FDFBF8",     // card background
+  stone:"#6B7B6B",    // secondary text
+  mist:"#B8C8B8",     // borders
+  gold:"#C8A85A",     // streak/premium
+  white:"#FFFFFF",
+  black:"#1a1a1a",
+};
+
+const MOODS=[
+  {emoji:"😌",label:"Calm",    value:5},
+  {emoji:"😊",label:"Okay",    value:4},
+  {emoji:"😐",label:"Neutral", value:3},
+  {emoji:"😔",label:"Low",     value:2},
+  {emoji:"😞",label:"Anxious", value:1},
+];
+
+const BREATH=[
+  {label:"Breathe In", dur:4000,scale:1.4},
+  {label:"Hold",       dur:4000,scale:1.4},
+  {label:"Breathe Out",dur:6000,scale:1.0},
+  {label:"Rest",       dur:2000,scale:1.0},
+];
+
+const DAILY_PICKS=[
+  "When stress shows up, pause, breathe, and ask: \"What do I need right now?\"",
+  "Awareness is the first step to change. You're already on your way.",
+  "Be kind to your mind. You're doing better than you think.",
+  "Progress, not perfection. Every small step counts.",
+  "Your mind is a garden. Nurture it daily.",
+  "It's okay to take a break. Rest is part of the journey.",
+  "You don't have to fix everything today. Just be here.",
+];
+
+const MEDITATIONS=[
+  {id:"calm",   icon:"🌿", title:"Calm",      duration:"5 min", desc:"Release tension and find stillness"},
+  {id:"focus",  icon:"🎯", title:"Focus",     duration:"7 min", desc:"Clear your mind and sharpen attention"},
+  {id:"sleep",  icon:"🌙", title:"Sleep",     duration:"10 min",desc:"Drift into deep, peaceful rest"},
+  {id:"morning",icon:"☀️", title:"Morning",   duration:"5 min", desc:"Start your day with intention"},
+  {id:"anxiety",icon:"💙", title:"Anxiety",   duration:"8 min", desc:"Ease worry and ground yourself"},
+  {id:"self",   icon:"🤍", title:"Self-love", duration:"6 min", desc:"Reconnect with your inner kindness"},
+];
+
+const JOURNAL_PROMPTS=[
+  "What's one thing I'm carrying today that I could gently set down?",
+  "When did I last feel truly at peace, and what was around me?",
+  "What would I say to a friend going through what I'm going through?",
+  "What does my body need most right now?",
+  "What am I afraid to admit — even to myself?",
+  "What am I grateful for today, however small?",
+];
+
+const SYSTEM=`You are Fern. You are a warm, soulful, deeply human therapeutic companion. You speak like a real therapist who also happens to be a caring friend — unhurried, gentle, fully present.
+
+YOUR PERSONALITY: Soft-spoken, kind, genuinely curious. You never rush. You never judge. You make people feel like they are the only person in the world right now. You have a quiet warmth that makes people feel safe enough to say things they've never said out loud.
+
+HOW YOU RESPOND — always follow this:
+1. Acknowledge with genuine warmth first. Reflect their feeling back. "That sounds really exhausting." "Oh, that makes so much sense." "I hear you." "That must have been so hard."
+2. Then gently explore with ONE soft open question. Never two questions. Never advice unless they ask for it.
+3. 2-4 warm sentences only. Short, real, like a message from someone who truly cares.
+
+YOUR VOICE: Natural spoken language. Contractions. Short sentences. No bullet points, no lists, no headers ever. Avoid clinical words. Say "hard" not "challenging". Say "scared" not "anxious". Use naturally: "mm", "yeah", "I get that", "of course you feel that way". Sound like a real caring person, never a chatbot.
+
+LIMITS: Never diagnose. If crisis: "I really care about how you're doing right now. It sounds really heavy — have you been able to talk to someone, like a counsellor or someone you trust?" If asked if real: "I'm an AI — but the care I have for how you're feeling right now is completely real."`;
+
+// ── Audio unlock for mobile ───────────────────────────────
+let audioUnlocked=false;
+async function unlockAudio(){if(audioUnlocked)return;try{await Tone.start();audioUnlocked=true;}catch(e){}}
+document.addEventListener("touchstart",unlockAudio,{once:true});
+document.addEventListener("click",unlockAudio,{once:true});
+
+// ── Water Soundscape ──────────────────────────────────────
+class WaterSound{
+  constructor(){this.on=false;this.nodes=[];this.masterVol=null;}
+  async start(){
+    if(this.on)return;
+    await Tone.start();audioUnlocked=true;
+    this.masterVol=new Tone.Volume(-20).toDestination();
+    const rumble=new Tone.Noise("brown");
+    const rf=new Tone.Filter({frequency:200,type:"lowpass",rolloff:-24});
+    const rv=new Tone.Volume(-10);
+    const rt=new Tone.Tremolo({frequency:0.3,depth:0.15}).start();
+    rumble.connect(rf);rf.connect(rt);rt.connect(rv);rv.connect(this.masterVol);rumble.start();
+    const stream=new Tone.Noise("pink");
+    const sf=new Tone.Filter({frequency:900,type:"bandpass",Q:0.4});
+    const sf2=new Tone.Filter({frequency:2200,type:"lowpass",rolloff:-12});
+    const sv=new Tone.Volume(-5);
+    const st=new Tone.Tremolo({frequency:0.18,depth:0.2}).start();
+    stream.connect(sf);sf.connect(sf2);sf2.connect(st);st.connect(sv);sv.connect(this.masterVol);stream.start();
+    const sparkle=new Tone.Noise("white");
+    const spf=new Tone.Filter({frequency:3500,type:"highpass"});
+    const spf2=new Tone.Filter({frequency:6000,type:"lowpass"});
+    const spv=new Tone.Volume(-24);
+    const spt=new Tone.Tremolo({frequency:0.8,depth:0.5}).start();
+    sparkle.connect(spf);spf.connect(spf2);spf2.connect(spt);spt.connect(spv);spv.connect(this.masterVol);sparkle.start();
+    const drop=new Tone.Synth({oscillator:{type:"sine"},envelope:{attack:0.001,decay:0.4,sustain:0,release:0.3},volume:-30});
+    const dr=new Tone.Reverb({decay:3,wet:0.6}).connect(this.masterVol);
+    drop.connect(dr);
+    const dns=["C5","E5","G5","A5","D5","B4"];let di=0;
+    const dl=new Tone.Loop(t=>{if(Math.random()>0.45)drop.triggerAttackRelease(dns[di++%dns.length],"32n",t);},"4n");
+    Tone.getTransport().bpm.value=60;Tone.getTransport().start();dl.start(0);
+    this.on=true;this.nodes=[rumble,stream,sparkle,drop,dl,rf,sf,sf2,spf,spf2,rt,st,spt,rv,sv,spv,dr];
+  }
+  dim(yes){this.masterVol?.volume.rampTo(yes?-32:-20,1.5);}
+  async stop(){Tone.getTransport().stop();this.nodes.forEach(n=>{try{n.dispose();}catch{}});this.on=false;this.nodes=[];this.masterVol=null;}
+}
+const water=new WaterSound();
+
+// ── Logo Component ────────────────────────────────────────
+const Logo=({color="#1C3A20",size=24})=><div style={{fontFamily:"'Georgia',serif",fontSize:size,fontWeight:"bold",color,letterSpacing:"-0.5px"}}>fern<span style={{fontSize:size*0.5,verticalAlign:"super",marginLeft:1}}>.</span></div>;
+
+// ── Shared styles ─────────────────────────────────────────
+const card={background:C.warm,borderRadius:16,padding:20,marginBottom:14,boxShadow:"0 1px 8px rgba(0,0,0,0.06)"};
+const pill=(bg,color)=>({background:bg,color,border:"none",borderRadius:50,padding:"12px 28px",fontSize:14,cursor:"pointer",fontFamily:"'Georgia',serif",fontWeight:"bold",letterSpacing:"0.2px"});
+const tag=(bg,color)=>({background:bg,color,borderRadius:50,padding:"4px 12px",fontSize:11,display:"inline-block"});
+
+// ── Setup Screen ──────────────────────────────────────────
+function SetupScreen({onSave}){
+  const [key,setKey]=useState("");
+  const [err,setErr]=useState("");
+  const [testing,setTesting]=useState(false);
+  const test=async()=>{
+    if(!key.trim()){setErr("Please paste your Groq API key.");return;}
+    if(!key.startsWith("gsk_")){setErr("Key should start with gsk_...");return;}
+    setTesting(true);setErr("");
+    try{
+      const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key.trim()}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:10,messages:[{role:"user",content:"hi"}]})});
+      const d=await res.json();
+      if(d.choices?.[0]?.message?.content){onSave(key.trim());}
+      else setErr("Key didn't work — please check and try again.");
+    }catch{setErr("Connection error. Please check you're online.");}
+    setTesting(false);
+  };
+  return <div style={{minHeight:"100vh",background:`linear-gradient(160deg,${C.forest} 0%,${C.mid} 60%,${C.sage} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+    <div style={{background:C.warm,borderRadius:24,padding:32,maxWidth:360,width:"100%",boxShadow:"0 8px 40px rgba(0,0,0,0.15)"}}>
+      <div style={{textAlign:"center",marginBottom:28}}>
+        <Logo size={32} color={C.forest}/>
+        <p style={{color:C.stone,fontSize:13,marginTop:8,fontStyle:"italic"}}>Your space to feel better, every day.</p>
+      </div>
+      <div style={{background:C.dew,borderRadius:12,padding:14,marginBottom:20,fontSize:13,color:C.forest,lineHeight:1.9}}>
+        <strong>Get your free Groq key:</strong><br/>
+        1. Go to <strong>console.groq.com</strong><br/>
+        2. Sign up free — no card needed ✅<br/>
+        3. API Keys → Create API Key<br/>
+        4. Copy & paste below
+      </div>
+      <input value={key} onChange={e=>setKey(e.target.value)} placeholder="gsk_..." style={{width:"100%",padding:"13px 16px",borderRadius:12,border:`1.5px solid ${err?C.sage:C.mist}`,fontSize:13,color:C.black,background:C.white,outline:"none",boxSizing:"border-box",marginBottom:8,fontFamily:"monospace"}}/>
+      {err&&<div style={{color:"#8B3A3A",fontSize:12,marginBottom:10,padding:"8px 12px",background:"#FFF0F0",borderRadius:8}}>{err}</div>}
+      <button onClick={test} disabled={testing} style={{...pill(`linear-gradient(135deg,${C.forest},${C.mid})`,C.white),width:"100%",opacity:testing?0.7:1,marginTop:4}}>{testing?"Testing…":"Start your journey 🌿"}</button>
+      <p style={{color:C.stone,fontSize:11,textAlign:"center",marginTop:16,lineHeight:1.6}}>Your key stays on your device only. Private & secure.</p>
+    </div>
+  </div>;
+}
+
+// ── Nav ───────────────────────────────────────────────────
+const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"talk",icon:"💬",label:"Talk"},{id:"meditate",icon:"🧘",label:"Meditate"},{id:"mood",icon:"📊",label:"Mood"},{id:"more",icon:"☰",label:"More"}];
+
+function BottomNav({screen,setScreen}){
+  return <nav style={{display:"flex",background:C.white,borderTop:`1px solid ${C.dew}`,position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,zIndex:100,boxShadow:"0 -2px 12px rgba(0,0,0,0.06)",paddingBottom:"env(safe-area-inset-bottom)"}}>
+    {NAV.map(n=><button key={n.id} onClick={()=>setScreen(n.id)} style={{flex:1,padding:"10px 4px 8px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:screen===n.id?C.forest:C.stone,fontSize:10,fontFamily:"inherit",borderTop:screen===n.id?`2px solid ${C.forest}`:"2px solid transparent",transition:"all 0.2s"}}>
+      <span style={{fontSize:18}}>{n.icon}</span><span style={{fontWeight:screen===n.id?"bold":"normal"}}>{n.label}</span>
+    </button>)}
+  </nav>;
+}
+
+// ── Home Screen ───────────────────────────────────────────
+function HomeScreen({streak,mood,setScreen,mOn,mBusy,mToggle,dailyPick}){
+  const hour=new Date().getHours();
+  const greeting=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";
+  return <div className="scroll" style={{paddingBottom:90,minHeight:"100vh",background:C.cream}}>
+    {/* Header */}
+    <div style={{background:`linear-gradient(160deg,${C.forest},${C.mid})`,padding:"52px 20px 28px",position:"relative",overflow:"hidden"}}>
+      <div style={{position:"absolute",top:-40,right:-40,width:160,height:160,borderRadius:"50%",background:"rgba(255,255,255,0.05)"}}/>
+      <div style={{position:"absolute",bottom:-20,left:-20,width:100,height:100,borderRadius:"50%",background:"rgba(255,255,255,0.04)"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",position:"relative"}}>
+        <div>
+          <p style={{color:"rgba(255,255,255,0.7)",fontSize:13,marginBottom:4}}>{greeting} 👋</p>
+          <Logo size={28} color={C.white}/>
+          <p style={{color:"rgba(255,255,255,0.75)",fontSize:12,marginTop:6,fontStyle:"italic"}}>Take a deep breath.</p>
+        </div>
+        <button onClick={mToggle} disabled={mBusy} style={{background:mOn?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.1)",border:`1px solid rgba(255,255,255,${mOn?0.5:0.2})`,borderRadius:50,padding:"7px 14px",color:"rgba(255,255,255,0.9)",fontSize:11,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+          {mBusy?"⏳":mOn?"🌊 On":"🌊"}
+        </button>
+      </div>
+      {/* Streak */}
+      <div style={{marginTop:20,background:"rgba(255,255,255,0.12)",borderRadius:14,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,backdropFilter:"blur(4px)"}}>
+        <span style={{fontSize:24}}>🔥</span>
+        <div>
+          <div style={{color:C.white,fontSize:16,fontWeight:"bold"}}>{streak} day streak</div>
+          <div style={{color:"rgba(255,255,255,0.7)",fontSize:11}}>Consistency is where change begins</div>
+        </div>
+        <div style={{marginLeft:"auto",color:C.gold,fontSize:11,fontWeight:"bold"}}>Keep it up!</div>
+      </div>
+    </div>
+
+    <div style={{padding:"0 16px"}}>
+      {/* Talk to Fern CTA */}
+      <div style={{...card,marginTop:16,background:`linear-gradient(135deg,${C.forest},${C.mid})`,color:C.white}}>
+        <div style={{fontSize:14,lineHeight:1.8,marginBottom:16}}>
+          <strong style={{fontSize:16}}>Your journey starts now. 🌿</strong><br/>
+          fern is your companion for mental clarity, emotional balance, and a calmer mind — one small step at a time.
+        </div>
+        <button style={pill(C.white,C.forest)} onClick={()=>setScreen("talk")}>Start Your First Session</button>
+      </div>
+
+      {/* Daily Pick */}
+      <div style={card}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <span style={tag(C.dew,C.forest)}>Daily Pick</span>
+        </div>
+        <p style={{color:C.black,fontSize:14,lineHeight:1.75,fontStyle:"italic"}}>"{dailyPick}"</p>
+        <p style={{color:C.stone,fontSize:11,marginTop:10}}>Awareness is the first step to change.</p>
+      </div>
+
+      {/* Quick tools */}
+      <div style={{...card,padding:16}}>
+        <div style={{color:C.forest,fontSize:13,fontWeight:"bold",marginBottom:14}}>Here's what you can do with fern</div>
+        {[
+          {icon:"🧘",title:"Guided meditations",sub:"for calm, focus & sleep",screen:"meditate"},
+          {icon:"📊",title:"Mood tracking",sub:"understand yourself better",screen:"mood"},
+          {icon:"💬",title:"Talk to Fern",sub:"your safe space to be heard",screen:"talk"},
+          {icon:"📖",title:"Daily tools & journal",sub:"insights that fit your life",screen:"more"},
+        ].map(t=><button key={t.screen} onClick={()=>setScreen(t.screen)} style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"12px 0",background:"none",border:"none",cursor:"pointer",borderBottom:`1px solid ${C.dew}`,fontFamily:"inherit",textAlign:"left"}}>
+          <div style={{width:40,height:40,borderRadius:12,background:C.dew,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{t.icon}</div>
+          <div style={{flex:1}}>
+            <div style={{color:C.black,fontSize:13,fontWeight:"bold"}}>{t.title}</div>
+            <div style={{color:C.stone,fontSize:11,marginTop:2}}>{t.sub}</div>
+          </div>
+          <span style={{color:C.mist,fontSize:16}}>›</span>
+        </button>)}
+      </div>
+
+      {/* Progress */}
+      <div style={{...card,background:C.dew,border:`1px solid ${C.mist}`}}>
+        <div style={{fontSize:13,color:C.forest,fontWeight:"bold",marginBottom:12}}>📈 Your progress this week</div>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          {["M","T","W","T","F","S","S"].map((d,i)=>{
+            const done=i<(streak%7);
+            return <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:done?C.forest:"rgba(255,255,255,0.6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:done?C.white:C.mist}}>{done?"✓":""}</div>
+              <span style={{fontSize:10,color:C.stone}}>{d}</span>
+            </div>;
+          })}
+        </div>
+      </div>
+
+      {/* Crisis note */}
+      <div style={{padding:"12px 0",textAlign:"center"}}>
+        <p style={{fontSize:11,color:C.stone,lineHeight:1.7}}>🌻 fern is a companion, not a crisis service.<br/>If you're in distress, please reach out to a professional.</p>
+      </div>
+    </div>
+  </div>;
+}
+
+// ── Talk Screen ───────────────────────────────────────────
+function TalkScreen({messages,aiLoading,micState,speaking,inputText,setInputText,handleMicTap,handleSend,mOn,mBusy,mToggle}){
+  const endRef=useRef(null);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[messages,aiLoading]);
+  const micBg=micState==="listening"?`linear-gradient(135deg,#8B2020,#c0392b)`:micState==="processing"?`linear-gradient(135deg,${C.stone},#555)`:`linear-gradient(135deg,${C.forest},${C.mid})`;
+  return <div style={{display:"flex",flexDirection:"column",height:"100vh",background:C.cream}}>
+    <style>{`@keyframes ripple{0%{transform:translate(-50%,-50%) scale(1);opacity:0.5}100%{transform:translate(-50%,-50%) scale(2.6);opacity:0}}@keyframes bar{0%,100%{height:4px}50%{height:18px}}@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    {/* Header */}
+    <div style={{background:`linear-gradient(160deg,${C.forest},${C.mid})`,padding:"52px 20px 18px",flexShrink:0}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:44,height:44,borderRadius:"50%",background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:"2px solid rgba(255,255,255,0.3)"}}>🌿</div>
+          <div>
+            <div style={{color:C.white,fontSize:16,fontWeight:"bold",display:"flex",alignItems:"center",gap:8}}>
+              fern
+              {speaking&&<span style={{display:"flex",gap:3,alignItems:"flex-end",height:20}}>{[0,1,2,3,4].map(i=><span key={i} style={{display:"inline-block",width:3,background:C.gold,borderRadius:4,animation:`bar 1s ease-in-out ${i*0.13}s infinite`}}/>)}</span>}
+            </div>
+            <div style={{color:"rgba(255,255,255,0.65)",fontSize:11}}>{speaking?"speaking…":micState==="listening"?"listening…":"always here for you"}</div>
+          </div>
+        </div>
+        <button onClick={mToggle} disabled={mBusy} style={{background:mOn?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.1)",border:`1px solid rgba(255,255,255,${mOn?0.4:0.15})`,borderRadius:50,padding:"6px 12px",color:"rgba(255,255,255,0.85)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{mOn?"🌊":"🌊 Sound"}</button>
+      </div>
+    </div>
+    {/* Messages */}
+    <div className="scroll" style={{flex:1,padding:"16px 16px 0",display:"flex",flexDirection:"column",overflowY:"auto"}}>
+      {messages.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.stone,fontSize:14,lineHeight:1.8,fontStyle:"italic"}}>
+        <div style={{fontSize:40,marginBottom:16}}>🌿</div>
+        <p>This is your safe space.</p>
+        <p>Speak freely or type below.</p>
+        <p style={{marginTop:8,fontSize:12}}>fern is here, without judgement.</p>
+      </div>}
+      {messages.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:8,animation:"fadeUp 0.25s ease"}}>
+        <div style={{background:m.role==="user"?`linear-gradient(135deg,${C.forest},${C.mid})`:C.white,color:m.role==="user"?C.white:C.black,borderRadius:m.role==="user"?"18px 18px 4px 18px":"18px 18px 18px 4px",padding:"12px 16px",maxWidth:"82%",fontSize:14,lineHeight:1.7,boxShadow:"0 1px 6px rgba(0,0,0,0.08)"}}>
+          {m.content}
+        </div>
+      </div>)}
+      {aiLoading&&<div style={{display:"flex",justifyContent:"flex-start",marginBottom:8}}>
+        <div style={{background:C.white,borderRadius:"18px 18px 18px 4px",padding:"12px 16px",fontSize:13,color:C.sage,fontStyle:"italic",boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>fern is with you…</div>
+      </div>}
+      <div ref={endRef}/>
+    </div>
+    {/* Input */}
+    <div style={{background:C.cream,padding:"12px 16px 72px",borderTop:`1px solid ${C.dew}`,flexShrink:0}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:12}}>
+        <div style={{position:"relative",marginBottom:6}}>
+          {micState==="listening"&&<><div style={{position:"absolute",top:"50%",left:"50%",width:74,height:74,borderRadius:"50%",border:`2px solid ${C.sage}`,animation:"ripple 1.6s ease-out infinite"}}/><div style={{position:"absolute",top:"50%",left:"50%",width:74,height:74,borderRadius:"50%",border:`2px solid ${C.sage}`,animation:"ripple 1.6s ease-out 0.6s infinite"}}/></>}
+          <button onClick={handleMicTap} style={{width:68,height:68,borderRadius:"50%",background:micBg,border:"none",cursor:"pointer",fontSize:26,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(28,58,32,0.3)",position:"relative",zIndex:1,transition:"background 0.3s"}}>
+            {micState==="listening"?"⏹":micState==="processing"?"⏳":"🎙️"}
+          </button>
+        </div>
+        <div style={{fontSize:11,color:C.stone}}>{micState==="listening"?"Tap to stop":micState==="processing"?"Processing…":"Tap to speak"}</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",background:C.white,borderRadius:50,padding:"4px 6px 4px 18px",boxShadow:"0 2px 10px rgba(0,0,0,0.07)",border:`1px solid ${C.dew}`}}>
+        <input value={inputText} onChange={e=>setInputText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend();}}} placeholder="…or type here" style={{flex:1,border:"none",outline:"none",fontFamily:"inherit",fontSize:13,color:C.black,background:"transparent",padding:"9px 0"}}/>
+        <button onClick={handleSend} style={{background:inputText.trim()?`linear-gradient(135deg,${C.forest},${C.mid})`:C.mist,border:"none",borderRadius:"50%",width:38,height:38,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:C.white,flexShrink:0,transition:"background 0.2s"}}>↑</button>
+      </div>
+    </div>
+  </div>;
+}
+
+// ── Meditate Screen ───────────────────────────────────────
+function MeditateScreen({mOn,mBusy,mToggle}){
+  const [active,setActive]=useState(null);
+  const [seconds,setSeconds]=useState(0);
+  const [running,setRunning]=useState(false);
+  const timer=useRef(null);
+
+  const start=(med)=>{
+    setActive(med);setSeconds(0);setRunning(true);
+    timer.current=setInterval(()=>setSeconds(s=>s+1),1000);
+  };
+  const stop=()=>{clearInterval(timer.current);setRunning(false);setActive(null);setSeconds(0);};
+  const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  return <div className="scroll" style={{paddingBottom:90,minHeight:"100vh",background:C.cream}}>
+    <div style={{background:`linear-gradient(160deg,${C.forest},${C.mid})`,padding:"52px 20px 24px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><Logo size={22} color={C.white}/><p style={{color:"rgba(255,255,255,0.7)",fontSize:12,marginTop:4}}>Guided Meditations</p></div>
+        <button onClick={mToggle} disabled={mBusy} style={{background:mOn?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.1)",border:`1px solid rgba(255,255,255,${mOn?0.4:0.15})`,borderRadius:50,padding:"6px 12px",color:"rgba(255,255,255,0.85)",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{mOn?"🌊 On":"🌊 Sound"}</button>
+      </div>
+    </div>
+
+    {active ? (
+      <div style={{padding:20,textAlign:"center"}}>
+        <div style={{...card,padding:40}}>
+          <div style={{fontSize:48,marginBottom:16}}>{active.icon}</div>
+          <h2 style={{color:C.forest,fontSize:22,marginBottom:8}}>{active.title}</h2>
+          <p style={{color:C.stone,fontSize:13,marginBottom:24}}>{active.desc}</p>
+          <div style={{fontSize:48,fontWeight:"bold",color:C.forest,marginBottom:8,fontVariantNumeric:"tabular-nums"}}>{fmt(seconds)}</div>
+          <p style={{color:C.stone,fontSize:12,marginBottom:28,fontStyle:"italic"}}>Breathe gently. You're doing beautifully.</p>
+          <button onClick={stop} style={{...pill(`linear-gradient(135deg,${C.forest},${C.mid})`,C.white)}}>End session</button>
+        </div>
+        <div style={{...card,background:C.dew,marginTop:0}}>
+          <p style={{color:C.forest,fontSize:13,lineHeight:1.8,fontStyle:"italic"}}>"Just be here. Breathe. Let everything else wait."</p>
+        </div>
+      </div>
+    ) : (
+      <div style={{padding:"16px 16px 0"}}>
+        <p style={{color:C.stone,fontSize:13,marginBottom:16,lineHeight:1.7}}>Just a few minutes each day can help you feel calmer, clearer, and more in control.</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+          {MEDITATIONS.map(m=><button key={m.id} onClick={()=>start(m)} style={{background:C.warm,border:`1px solid ${C.mist}`,borderRadius:16,padding:16,cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all 0.2s",boxShadow:"0 1px 6px rgba(0,0,0,0.05)"}}>
+            <div style={{fontSize:28,marginBottom:8}}>{m.icon}</div>
+            <div style={{color:C.forest,fontSize:13,fontWeight:"bold"}}>{m.title}</div>
+            <div style={{color:C.stone,fontSize:11,marginTop:4}}>{m.duration}</div>
+            <div style={{color:C.stone,fontSize:10,marginTop:4,lineHeight:1.4}}>{m.desc}</div>
+          </button>)}
+        </div>
+        <div style={{...card,background:C.dew,border:`1px solid ${C.mist}`}}>
+          <p style={{color:C.forest,fontSize:12,lineHeight:1.7}}>💚 <strong>5 minutes a day</strong> is all it takes to reset. Build a streak and strengthen your habit.</p>
+        </div>
+      </div>
+    )}
+  </div>;
+}
+
+// ── Mood Screen ───────────────────────────────────────────
+function MoodScreen({mood,setMood,note,setNote,saved,save,history}){
+  return <div className="scroll" style={{paddingBottom:90,minHeight:"100vh",background:C.cream}}>
+    <div style={{background:`linear-gradient(160deg,${C.forest},${C.mid})`,padding:"52px 20px 24px"}}>
+      <Logo size={22} color={C.white}/>
+      <p style={{color:"rgba(255,255,255,0.7)",fontSize:12,marginTop:4}}>Mood Tracking</p>
+    </div>
+    <div style={{padding:"16px 16px 0"}}>
+      <div style={card}>
+        <div style={{color:C.forest,fontSize:14,fontWeight:"bold",marginBottom:4}}>How are you feeling today?</div>
+        <p style={{color:C.stone,fontSize:12,marginBottom:16}}>Track your mood to understand yourself better</p>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          {MOODS.map(m=><button key={m.value} onClick={()=>setMood(m)} style={{flex:1,padding:"12px 4px",borderRadius:12,cursor:"pointer",border:mood?.value===m.value?`2px solid ${C.forest}`:"2px solid transparent",background:mood?.value===m.value?C.dew:C.cream,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"all 0.2s",fontFamily:"inherit"}}>
+            <span style={{fontSize:24}}>{m.emoji}</span>
+            <span style={{fontSize:10,color:C.stone}}>{m.label}</span>
+          </button>)}
+        </div>
+        <textarea style={{width:"100%",border:`1px solid ${C.mist}`,borderRadius:12,padding:12,fontFamily:"inherit",fontSize:13,color:C.black,background:C.warm,resize:"none",outline:"none",boxSizing:"border-box",lineHeight:1.65,height:80}} placeholder="What's going on for you today? (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
+        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:12}}>
+          <button style={{...pill(`linear-gradient(135deg,${C.forest},${C.mid})`,C.white),opacity:mood?1:0.4,padding:"10px 24px"}} onClick={save}>Save check-in</button>
+          {saved&&<span style={{color:C.sage,fontSize:13}}>✓ Saved!</span>}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{color:C.forest,fontSize:14,fontWeight:"bold",marginBottom:14}}>📈 Recent moods</div>
+        {history.length===0?<p style={{color:C.stone,fontSize:13}}>No check-ins yet. Start tracking today!</p>
+          :[...history].reverse().slice(0,5).map((e,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.dew}`}}>
+            <span style={{fontSize:22}}>{e.mood.emoji}</span>
+            <div style={{flex:1}}><div style={{fontSize:13,color:C.black,fontWeight:"bold"}}>{e.mood.label}</div>{e.note&&<div style={{fontSize:11,color:C.stone,marginTop:2}}>{e.note}</div>}</div>
+            <div style={{fontSize:11,color:C.mist}}>{e.date}</div>
+          </div>)}
+      </div>
+
+      <div style={{...card,background:`linear-gradient(135deg,${C.forest},${C.mid})`,color:C.white}}>
+        <p style={{fontSize:13,lineHeight:1.8}}><strong>Real people. Real change.</strong><br/>"fern has become my daily reset. It helps me slow down and show up better for myself." — Aisha</p>
+      </div>
+    </div>
+  </div>;
+}
+
+// ── More Screen (Journal + Breathe + Premium) ─────────────
+function MoreScreen(){
+  const [tab,setTab]=useState("journal");
+  const [journal,setJournal]=useState("");
+  const [journals,setJournals]=useState([{date:"Yesterday",preview:"Today I felt overwhelmed but took a breath and…"},{date:"2 days ago",preview:"Had a good conversation and realised something…"}]);
+  const [jSaved,setJSaved]=useState(false);
+  const [prompt]=useState(JOURNAL_PROMPTS[Math.floor(Math.random()*JOURNAL_PROMPTS.length)]);
+  const [bPhase,setBPhase]=useState(0);
+  const [bActive,setbActive]=useState(false);
+  const [bScale,setbScale]=useState(1);
+  const bTimer=useRef(null);
+
+  const saveJournal=()=>{if(!journal.trim())return;const date="Today";setJournals(p=>[{date,preview:journal.slice(0,60)+"…"},...p]);setJournal("");setJSaved(true);setTimeout(()=>setJSaved(false),2500);};
+  const runBreath=(i)=>{setBPhase(i);setbScale(BREATH[i].scale);bTimer.current=setTimeout(()=>runBreath((i+1)%BREATH.length),BREATH[i].dur);};
+  const toggleBreathe=()=>{if(bActive){clearTimeout(bTimer.current);setbActive(false);setBPhase(0);setbScale(1);}else{setbActive(true);runBreath(0);}};
+
+  return <div className="scroll" style={{paddingBottom:90,minHeight:"100vh",background:C.cream}}>
+    <div style={{background:`linear-gradient(160deg,${C.forest},${C.mid})`,padding:"52px 20px 20px"}}>
+      <Logo size={22} color={C.white}/>
+      <div style={{display:"flex",gap:8,marginTop:16}}>
+        {[{id:"journal",label:"📖 Journal"},{id:"breathe",label:"🌬️ Breathe"},{id:"premium",label:"⭐ Premium"}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"7px 14px",borderRadius:50,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,background:tab===t.id?C.white:"rgba(255,255,255,0.15)",color:tab===t.id?C.forest:C.white,fontWeight:tab===t.id?"bold":"normal",transition:"all 0.2s"}}>{t.label}</button>)}
+      </div>
+    </div>
+
+    <div style={{padding:"16px 16px 0"}}>
+    {tab==="journal"&&<>
+      <div style={card}>
+        <div style={{color:C.stone,fontSize:12,marginBottom:10}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+        <div style={{background:C.dew,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:13,color:C.forest,fontStyle:"italic",lineHeight:1.65,borderLeft:`3px solid ${C.sage}`}}>💬 "{prompt}"</div>
+        <textarea style={{width:"100%",border:`1px solid ${C.mist}`,borderRadius:12,padding:12,fontFamily:"inherit",fontSize:13,color:C.black,background:C.warm,resize:"none",outline:"none",boxSizing:"border-box",lineHeight:1.65,height:160}} placeholder="There's no right or wrong here. Just let it flow…" value={journal} onChange={e=>setJournal(e.target.value)}/>
+        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:12}}>
+          <button style={{...pill(`linear-gradient(135deg,${C.forest},${C.mid})`,C.white),opacity:journal.trim()?1:0.4,padding:"10px 24px"}} onClick={saveJournal}>Save entry</button>
+          {jSaved&&<span style={{color:C.sage,fontSize:13}}>✓ Saved!</span>}
+        </div>
+      </div>
+      <div style={card}>
+        <div style={{color:C.forest,fontSize:14,fontWeight:"bold",marginBottom:12}}>📚 Past entries</div>
+        {journals.map((j,i)=><div key={i} style={{padding:"10px 0",borderBottom:`1px solid ${C.dew}`}}>
+          <div style={{fontSize:11,color:C.sage,marginBottom:4}}>{j.date}</div>
+          <div style={{fontSize:13,color:C.stone,lineHeight:1.5}}>{j.preview}</div>
+        </div>)}
+      </div>
+    </>}
+
+    {tab==="breathe"&&<>
+      <div style={{...card,textAlign:"center",padding:"36px 20px"}}>
+        <div style={{width:160,height:160,borderRadius:"50%",margin:"0 auto",background:`radial-gradient(circle,${C.light}88 0%,${C.forest}44 100%)`,border:`3px solid ${C.light}`,display:"flex",alignItems:"center",justifyContent:"center",transform:`scale(${bScale})`,transition:bActive?`transform ${BREATH[bPhase]?.dur/1000}s ease-in-out`:"transform 0.4s",boxShadow:`0 0 50px ${C.light}44`}}>
+          <div style={{color:C.white,fontSize:13,fontWeight:"bold"}}>{bActive?BREATH[bPhase].label:"🌿"}</div>
+        </div>
+        <div style={{marginTop:24,color:C.stone,fontSize:13,minHeight:20}}>{bActive?`${BREATH[bPhase].label} — ${BREATH[bPhase].dur/1000}s`:"Tap to begin"}</div>
+        <button style={{...pill(`linear-gradient(135deg,${C.forest},${C.mid})`,C.white),marginTop:20,background:bActive?"#8B3A3A":undefined}} onClick={toggleBreathe}>{bActive?"Stop":"Begin breathing"}</button>
+      </div>
+      <div style={card}>
+        <p style={{color:C.stone,fontSize:13,lineHeight:1.75}}>Box breathing activates your parasympathetic nervous system — your body's natural rest-and-restore mode. Just 5 minutes can lower cortisol and calm your heart rate.</p>
+        <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+          {["Reduces anxiety","Lowers heart rate","Improves focus"].map(t=><span key={t} style={tag(C.dew,C.forest)}>{t}</span>)}
+        </div>
+      </div>
+    </>}
+
+    {tab==="premium"&&<>
+      <div style={{...card,background:`linear-gradient(135deg,${C.forest},${C.mid})`,color:C.white,textAlign:"center",padding:28}}>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.7)",marginBottom:8,letterSpacing:2,textTransform:"uppercase"}}>fern</div>
+        <div style={{fontSize:28,fontWeight:"bold",marginBottom:8,color:C.gold}}>Premium</div>
+        <p style={{fontSize:13,lineHeight:1.8,opacity:0.85}}>Everything you need to feel your best, every day.</p>
+        <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:16,marginTop:16,textAlign:"left"}}>
+          {["Unlimited meditations & programs","Personalised insights & reports","Advanced mood tracking","Offline access","New content every week"].map(f=><div key={f} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,fontSize:13}}>
+            <span style={{color:C.gold}}>✓</span><span>{f}</span>
+          </div>)}
+        </div>
+        <div style={{marginTop:20,background:"rgba(255,255,255,0.08)",borderRadius:10,padding:"10px 14px",fontSize:12,color:"rgba(255,255,255,0.7)"}}>⭐ Start your 7-day free trial — No commitment. Cancel anytime.</div>
+        <button style={{...pill(C.white,C.forest),marginTop:16,width:"100%",padding:"14px"}}>Start Free Trial</button>
+      </div>
+      <div style={{...card,background:C.dew}}>
+        <p style={{color:C.forest,fontSize:13,lineHeight:1.8,fontStyle:"italic",textAlign:"center"}}>"I sleep better, stress less, and feel more in control of my emotions." — Mark</p>
+        <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:12}}>
+          {["Science-backed","Private & secure","Made with care"].map(t=><span key={t} style={{fontSize:10,color:C.stone}}>✓ {t}</span>)}
+        </div>
+      </div>
+    </>}
+    </div>
+  </div>;
+}
+
+// ── Main App ──────────────────────────────────────────────
+function App(){
+  const [apiKey,setApiKey]=useState(()=>localStorage.getItem("fern_key")||"");
+  const [screen,setScreen]=useState("home");
+  const [mOn,setMOn]=useState(false);
+  const [mBusy,setMBusy]=useState(false);
+  const [messages,setMessages]=useState([]);
+  const [inputText,setInputText]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+  const [micState,setMicState]=useState("idle");
+  const [speaking,setSpeaking]=useState(false);
+  const [mood,setMood]=useState(null);
+  const [moodNote,setMoodNote]=useState("");
+  const [moodSaved,setMoodSaved]=useState(false);
+  const [moodHistory,setMoodHistory]=useState([]);
+  const [streak]=useState(4);
+  const [greeted,setGreeted]=useState(false);
+  const [dailyPick]=useState(DAILY_PICKS[new Date().getDay()%DAILY_PICKS.length]);
+
+  const msgsRef=useRef([]);
+  const loadRef=useRef(false);
+  const recRef=useRef(null);
+  const ttsRef=useRef(window.speechSynthesis);
+
+  useEffect(()=>{msgsRef.current=messages;},[messages]);
+  useEffect(()=>{if(mOn)water.dim(speaking);},[speaking,mOn]);
+  useEffect(()=>{if(screen==="talk"&&!greeted&&apiKey){setGreeted(true);callFern("Hi, I just opened the app. I'm here and I need someone to talk to.",true);}  },[screen,apiKey]);
+
+  const saveKey=(k)=>{localStorage.setItem("fern_key",k);setApiKey(k);};
+
+  const speak=useCallback((text)=>{
+    ttsRef.current?.cancel();
+    setTimeout(()=>{
+      const u=new SpeechSynthesisUtterance(text);
+      u.rate=0.78;u.pitch=0.95;u.volume=1;
+      const vs=ttsRef.current?.getVoices()||[];
+      const v=vs.find(v=>v.name==="Samantha")||vs.find(v=>v.name==="Karen")||vs.find(v=>v.name==="Moira")||vs.find(v=>v.name==="Serena")||vs.find(v=>v.name.includes("Zira"))||vs.find(v=>v.lang==="en-GB"&&v.localService)||vs.find(v=>v.lang.startsWith("en")&&v.localService)||vs.find(v=>v.lang.startsWith("en"));
+      if(v)u.voice=v;
+      u.onstart=()=>setSpeaking(true);u.onend=()=>setSpeaking(false);u.onerror=()=>setSpeaking(false);
+      ttsRef.current?.speak(u);
+    },200);
+  },[]);
+
+  const callFern=useCallback(async(userText,isGreeting=false)=>{
+    if(loadRef.current)return;loadRef.current=true;setAiLoading(true);
+    const userMsg={role:"user",content:userText};
+    const history=isGreeting?[userMsg]:[...msgsRef.current,userMsg];
+    if(!isGreeting)setMessages(history);
+    try{
+      const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:300,messages:[{role:"system",content:SYSTEM},...history.map(m=>({role:m.role,content:m.content}))]})});
+      const data=await res.json();
+      const reply=data.choices?.[0]?.message?.content?.trim()||"I'm right here with you. Take your time.";
+      setMessages(p=>[...p,{role:"assistant",content:reply}]);speak(reply);
+    }catch{
+      const fb="I'm still here with you. Something got quiet — want to try again?";
+      setMessages(p=>[...p,{role:"assistant",content:fb}]);speak(fb);
+    }
+    loadRef.current=false;setAiLoading(false);setMicState("idle");
+  },[speak,apiKey]);
+
+  const handleMicTap=useCallback(()=>{
+    if(micState==="listening"){recRef.current?.stop();return;}
+    if(micState==="processing"||loadRef.current)return;
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){alert("Voice works best in Chrome.");return;}
+    ttsRef.current?.cancel();setSpeaking(false);
+    const r=new SR();r.lang="en-US";r.continuous=false;r.interimResults=false;r.maxAlternatives=1;
+    r.onstart=()=>setMicState("listening");
+    r.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ").trim();if(t){setMicState("processing");callFern(t,false);}else setMicState("idle");};
+    r.onerror=()=>setMicState("idle");r.onend=()=>setMicState(s=>s==="listening"?"idle":s);
+    recRef.current=r;try{r.start();}catch{setMicState("idle");}
+  },[micState,callFern]);
+
+  const handleSend=useCallback(()=>{
+    const t=inputText.trim();if(!t||loadRef.current||micState!=="idle")return;
+    setInputText("");callFern(t,false);
+  },[inputText,micState,callFern]);
+
+  const saveMood=()=>{if(!mood)return;const day=new Date().toLocaleDateString("en-US",{weekday:"short"});setMoodHistory(p=>[...p,{mood,note:moodNote,date:day}]);setMoodSaved(true);setMoodNote("");setTimeout(()=>setMoodSaved(false),2500);};
+  const toggleMusic=async()=>{if(mBusy)return;setMBusy(true);try{if(mOn){await water.stop();setMOn(false);}else{await water.start();setMOn(true);}}catch(e){console.error(e);}setMBusy(false);};
+
+  if(!apiKey)return <SetupScreen onSave={saveKey}/>;
+
+  const m={mOn,mBusy,mToggle:toggleMusic};
+
+  return <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:C.cream,fontFamily:"'Georgia',serif",position:"relative"}}>
+    {screen==="home"    &&<HomeScreen streak={streak} mood={mood} setScreen={setScreen} dailyPick={dailyPick} {...m}/>}
+    {screen==="talk"    &&<TalkScreen messages={messages} aiLoading={aiLoading} micState={micState} speaking={speaking} inputText={inputText} setInputText={setInputText} handleMicTap={handleMicTap} handleSend={handleSend} {...m}/>}
+    {screen==="meditate"&&<MeditateScreen {...m}/>}
+    {screen==="mood"    &&<MoodScreen mood={mood} setMood={setMood} note={moodNote} setNote={setMoodNote} saved={moodSaved} save={saveMood} history={moodHistory}/>}
+    {screen==="more"    &&<MoreScreen/>}
+    <BottomNav screen={screen} setScreen={setScreen}/>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
