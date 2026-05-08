@@ -590,16 +590,53 @@ function App(){
   },[speak,apiKey]);
 
   const handleMicTap=useCallback(()=>{
-    if(micState==="listening"){recRef.current?.stop();return;}
+    if(micState==="listening"){
+      // Stop and fully destroy the recognizer
+      try{recRef.current?.abort();}catch{}
+      recRef.current=null;
+      setMicState("idle");
+      return;
+    }
     if(micState==="processing"||loadRef.current)return;
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR){alert("Voice works best in Chrome.");return;}
+
+    // Fully destroy any previous recognizer before making a new one
+    try{recRef.current?.abort();}catch{}
+    recRef.current=null;
+
     ttsRef.current?.cancel();setSpeaking(false);
-    const r=new SR();r.lang="en-US";r.continuous=false;r.interimResults=false;r.maxAlternatives=1;
-    r.onstart=()=>setMicState("listening");
-    r.onresult=e=>{const t=Array.from(e.results).map(r=>r[0].transcript).join(" ").trim();if(t){setMicState("processing");callFern(t,false);}else setMicState("idle");};
-    r.onerror=()=>setMicState("idle");r.onend=()=>setMicState(s=>s==="listening"?"idle":s);
-    recRef.current=r;try{r.start();}catch{setMicState("idle");}
+
+    // Small delay to let browser release the mic before re-acquiring
+    setTimeout(()=>{
+      try{
+        const r=new SR();
+        r.lang="en-US";r.continuous=false;r.interimResults=false;r.maxAlternatives=1;
+        r.onstart=()=>setMicState("listening");
+        r.onresult=e=>{
+          const t=Array.from(e.results).map(r=>r[0].transcript).join(" ").trim();
+          try{recRef.current?.abort();}catch{}
+          recRef.current=null;
+          if(t){setMicState("processing");callFern(t,false);}
+          else setMicState("idle");
+        };
+        r.onerror=(err)=>{
+          console.warn("Mic error:",err.error);
+          try{recRef.current?.abort();}catch{}
+          recRef.current=null;
+          setMicState("idle");
+        };
+        r.onend=()=>{
+          recRef.current=null;
+          setMicState(s=>s==="listening"?"idle":s);
+        };
+        recRef.current=r;
+        r.start();
+      }catch(e){
+        recRef.current=null;
+        setMicState("idle");
+      }
+    },150);
   },[micState,callFern]);
 
   const handleSend=useCallback(()=>{
